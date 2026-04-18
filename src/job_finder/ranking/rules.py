@@ -13,6 +13,10 @@ DIRECT_RL_TERMS = {
     "deep q",
     "sequential decision",
     "multi-armed bandit",
+    "autonomous vehicle",
+    "autonomous driving",
+    "self-driving",
+    "motion planning",
 }
 
 ADJACENT_TERMS = {
@@ -24,6 +28,13 @@ ADJACENT_TERMS = {
     "decision intelligence",
     "machine learning",
     "deep learning",
+    "control systems",
+    "trajectory optimization",
+    "motion control",
+    "autonomous systems",
+    "perception systems",
+    "computer vision",
+    "path planning",
 }
 
 ROBOTICS_CONTROL_TERMS = {
@@ -32,6 +43,9 @@ ROBOTICS_CONTROL_TERMS = {
     "control",
     "trajectory",
     "navigation",
+    "av",
+    "robot",
+    "vehicle autonomy",
 }
 
 NEGATIVE_TERMS = {
@@ -189,7 +203,9 @@ def classify_job_with_rules(job: JobRecord, profile_text: str, prompt_text: str)
     score = _clamp(score, 0.0, 100.0)
     category = _detect_category(job_corpus, direct_hits, adjacent_hits)
 
-    is_relevant = score >= 55.0 and category in {
+    # Lower threshold for Budapest jobs (user confirmed these companies are relevant)
+    threshold = 50.0 if any(city in job_corpus for city in PRIORITY_LOCATIONS) else 55.0
+    is_relevant = score >= threshold and category in {
         "direct_rl",
         "adjacent_ml",
         "robotics_or_control",

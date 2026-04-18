@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import typer
@@ -13,6 +14,9 @@ from job_finder.config import AppConfig, load_config, render_default_config
 from job_finder.export import export_jobs_to_csv, export_jobs_to_markdown
 from job_finder.export.by_location import export_jobs_by_location
 from job_finder.export.pdf import export_shortlists_to_pdf
+from job_finder.collectors.manual_import import import_jobs_from_csv, import_jobs_from_json, create_sample_import_csv
+from job_finder.collectors.budapest_search import generate_job_search_guide
+from job_finder.collectors.scraper import scrape_all_budapest_companies, save_jobs_to_csv as scraper_save_jobs
 from job_finder.models import ClassificationResult, JobRecord
 from job_finder.profile_ingest import load_profile
 from job_finder.ranking import classify_job_with_ollama, classify_job_with_rules, apply_llm_final_gate
@@ -443,6 +447,109 @@ def export_pdf(
     typer.echo(f"Converted {len(pdf_files)} markdown files to PDF:")
     for name, pdf_path in sorted(pdf_files.items()):
         typer.echo(f"  {pdf_path}")
+@app.command()
+def import_jobs(
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    csv_file: Path | None = typer.Option(None, "--csv", "-i", help="CSV file with jobs to import."),
+    json_file: Path | None = typer.Option(None, "--json", "-j", help="JSON file with jobs to import."),
+) -> None:
+    """Import jobs from CSV or JSON file and add them to the database."""
+    if not csv_file and not json_file:
+        raise typer.BadParameter("Provide either --csv or --json file.")
+    
+    jobs_to_import = []
+    
+    if csv_file:
+        if not csv_file.exists():
+            raise typer.BadParameter(f"CSV file not found: {csv_file}")
+        jobs_to_import.extend(import_jobs_from_csv(csv_file))
+        typer.echo(f"Imported {len(jobs_to_import)} jobs from {csv_file}")
+    
+    if json_file:
+        if not json_file.exists():
+            raise typer.BadParameter(f"JSON file not found: {json_file}")
+        json_jobs = import_jobs_from_json(json_file)
+        jobs_to_import.extend(json_jobs)
+        typer.echo(f"Imported {len(json_jobs)} jobs from {json_file}")
+    
+    if not jobs_to_import:
+        typer.echo("No jobs found in provided files.")
+        return
+    
+    # Add to database
+    cfg = load_config(config)
+    conn = connect_db(cfg.database_path)
+    try:
+        init_db(conn)
+        upsert_jobs(conn, jobs_to_import)
+        total = count_jobs(conn)
+        typer.echo(f"Successfully added {len(jobs_to_import)} jobs. Database now has {total} total jobs.")
+    finally:
+        conn.close()
+
+
+@app.command()
+def create_import_template(
+    output: Path = typer.Option(Path("budapest_jobs.csv"), "--output", "-o", help="Output CSV file path."),
+) -> None:
+    """Create a sample CSV template for importing jobs."""
+    create_sample_import_csv(output)
+    typer.echo(f"Created sample import template: {output}")
+    typer.echo(f"Edit this file with your job data, then run:")
+    typer.echo(f"  uv run job-finder import-jobs --csv {output}")
+
+
+@app.command()
+def search_guide(
+    output: Path = typer.Option(Path("budapest_search_guide.md"), "--output", "-o", help="Output guide file path."),
+) -> None:
+    """Generate a guide for manually searching and importing Budapest ML jobs."""
+    generate_job_search_guide(output)
+    typer.echo(f"Generated search guide: {output}")
+    typer.echo(f"\nUse this guide to systematically find Budapest ML/AI jobs from:")
+    typer.echo("  - AiMotive (autonomous vehicles)")
+    typer.echo("  - Zenitech (GenAI)")
+    typer.echo("  - Turbine (biology + ML)")
+    typer.echo("  - Siemens (NLP/AI)")
+    typer.echo("  - SAP (agentic AI)")
+    typer.echo("  - KUKA (robotics AI)")
+    typer.echo("  - HCLTech (MLOps)")
+    typer.echo("  - micro1 (community detection)")
+
+
+@app.command()
+def scrape_budapest(
+    output: Path = typer.Option(Path("budapest_jobs_scraped.csv"), "--output", "-o", help="Output CSV file path."),
+) -> None:
+    """Scrape ML/AI job postings from Budapest company career pages.
+    
+    This command automatically searches 8 target companies for ML/AI roles:
+    AiMotive, Zenitech, Turbine, Siemens, KUKA, SAP, HCLTech, micro1
+    
+    Note: Scraping may take 30-60 seconds. Results depend on career page structure.
+    If no jobs are found, try the manual search guide with 'search-guide' command.
+    """
+    typer.echo("🔍 Scraping Budapest company career pages for ML/AI jobs...")
+    typer.echo("")
+    
+    jobs = asyncio.run(scrape_all_budapest_companies())
+    typer.echo("")
+    
+    if jobs:
+        scraper_save_jobs(jobs, output)
+        typer.echo(f"\n✅ Scraped {len(jobs)} jobs successfully!")
+        typer.echo(f"\nNext steps:")
+        typer.echo(f"1. Review:    less {output}")
+        typer.echo(f"2. Import:    uv run job-finder import-jobs --csv {output}")
+        typer.echo(f"3. Classify:  uv run job-finder classify -c config.toml --prompt-file prompt.txt --profile-file <your-cv.pdf> --all")
+        typer.echo(f"4. Export:    uv run job-finder export-by-location -c config.toml -o data")
+        typer.echo(f"5. PDF:       uv run job-finder export-pdf -d data")
+    else:
+        typer.echo("❌ No jobs scraped. Career pages may have different layouts or temporary accessibility issues.")
+        typer.echo(f"\nAlternative: Use manual search guide")
+        typer.echo(f"  uv run job-finder search-guide")
+        typer.echo(f"  Then manually collect jobs into a CSV file and import with:")
+        typer.echo(f"  uv run job-finder import-jobs --csv <your-file.csv>")
 
 
 def main() -> None:
