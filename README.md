@@ -51,8 +51,15 @@ Edit `config.toml` and adjust:
 
 - `database_path`: where SQLite will be stored
 - `collectors.greenhouse_boards`: board tokens for API collection
-- `collectors.seed_urls`: URLs for JSON-LD collection
+- `collectors.seed_urls`: URLs for structured data collection (JSON-LD and Ashby app data)
 - `collectors.html_fallback_urls`: optional generic HTML fallback URLs
+
+The default curated config is location-prioritized as follows:
+
+1. Budapest
+2. Vienna
+3. Graz
+4. Zurich
 
 Network/TLS note:
 
@@ -66,6 +73,11 @@ Use the sample files or provide your own:
 - `examples/profile.txt`: your static professional background
 - `examples/prompt.txt`: your current search objective
 
+Non-example working files are also provided:
+
+- `prompt.txt`: curated search prompt
+- `profile-template.txt`: fill-in template for your profile text
+
 ## Run The Pipeline
 
 One command (recommended):
@@ -73,8 +85,8 @@ One command (recommended):
 ```bash
 uv run job-finder run \
   -c config.toml \
-  --prompt-file examples/prompt.txt \
-  --profile-file examples/profile.txt \
+  --prompt-file prompt.txt \
+  --profile-file profile-template.txt \
   -f markdown \
   -o data/shortlist.md \
   --limit 30
@@ -84,9 +96,9 @@ Step by step:
 
 ```bash
 uv run job-finder collect -c config.toml
-uv run job-finder classify -c config.toml --prompt-file examples/prompt.txt --profile-file examples/profile.txt
+uv run job-finder classify -c config.toml --prompt-file prompt.txt --profile-file profile-template.txt
 uv run job-finder rank -c config.toml --limit 20
-uv run job-finder export -c config.toml -f markdown -o data/shortlist.md --prompt-file examples/prompt.txt
+uv run job-finder export -c config.toml -f markdown -o data/shortlist.md --prompt-file prompt.txt
 ```
 
 ## Optional Local LLM Classification
@@ -96,8 +108,8 @@ If Ollama is running locally:
 ```bash
 uv run job-finder classify \
   -c config.toml \
-  --prompt-file examples/prompt.txt \
-  --profile-file examples/profile.txt \
+  --prompt-file prompt.txt \
+  --profile-file profile-template.txt \
   --use-llm \
   --llm-model gemma3:4b
 ```
@@ -107,8 +119,8 @@ Or in one-shot mode:
 ```bash
 uv run job-finder run \
   -c config.toml \
-  --prompt-file examples/prompt.txt \
-  --profile-file examples/profile.txt \
+  --prompt-file prompt.txt \
+  --profile-file profile-template.txt \
   --use-llm \
   --llm-model gemma3:4b
 ```

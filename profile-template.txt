@@ -1,0 +1,40 @@
+Name:
+Email:
+LinkedIn/GitHub/Website:
+
+Current title:
+Seniority: (mid / senior / staff / principal)
+Years of experience:
+
+Core skills:
+- Python
+- PyTorch/JAX
+- RL / offline RL
+- imitation learning
+- robotics / autonomy
+- simulation (CARLA / Isaac / MuJoCo / etc.)
+- distributed training / MLOps
+- C++ (optional)
+
+Domain focus:
+- reinforcement learning
+- offline RL
+- robotics learning
+- sequential decision making
+- motion planning / control
+- autonomous systems
+
+Preferred roles:
+Preferred industries:
+Preferred company stage: (startup / growth / research lab / enterprise)
+
+Location:
+Work authorization:
+Remote preference: (remote only / hybrid / onsite)
+Remote from Hungary: (yes / no)
+Preferred geographies: (Hungary / EU remote / global remote)
+
+Compensation target:
+Notice period:
+Must-have filters:
+Nice-to-have filters:

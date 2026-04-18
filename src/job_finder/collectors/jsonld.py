@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 import json
+import re
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -50,6 +51,123 @@ def _read_jsonld_scripts(html: str) -> list[dict[str, object]]:
         for obj in _iter_jsonld_objects(payload):
             if _is_job_posting(obj):
                 out.append(obj)
+
+    return out
+
+
+def _read_ashby_app_data(html: str) -> dict[str, object] | None:
+    # Ashby embeds a large JSON payload in an inline assignment.
+    match = re.search(r"window\.__appData\s*=\s*(\{.*?\});", html, flags=re.DOTALL)
+    if not match:
+        return None
+
+    raw = match.group(1)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _extract_ashby_postings(seed_url: str, html: str) -> list[JobRecord]:
+    app_data = _read_ashby_app_data(html)
+    if app_data is None:
+        return []
+
+    parsed_url = urlparse(seed_url)
+    slug = parsed_url.path.strip("/").split("/")[0]
+    if not slug:
+        slug = parsed_url.netloc or "ashby"
+
+    posting_objects: list[dict[str, object]] = []
+
+    posting = app_data.get("posting")
+    if isinstance(posting, dict):
+        posting_objects.append(posting)
+
+    job_board = app_data.get("jobBoard")
+    if isinstance(job_board, dict):
+        for item in job_board.get("jobPostings", []):
+            if isinstance(item, dict):
+                posting_objects.append(item)
+
+    if not posting_objects:
+        return []
+
+    out: list[JobRecord] = []
+    seen: set[str] = set()
+    for raw in posting_objects:
+        title = str(raw.get("title") or "").strip()
+        if not title:
+            continue
+
+        posting_id = str(raw.get("id") or "").strip()
+        url_raw = str(raw.get("jobPostingUrl") or raw.get("url") or "").strip()
+        if not url_raw and posting_id:
+            url_raw = f"https://jobs.ashbyhq.com/{slug}/{posting_id}"
+        if not url_raw:
+            url_raw = seed_url
+
+        canonical_url = canonicalize_url(url_raw)
+        if canonical_url in seen:
+            continue
+        seen.add(canonical_url)
+
+        location_raw = str(raw.get("locationName") or raw.get("location") or "").strip()
+        if not location_raw:
+            secondary = raw.get("secondaryLocations")
+            if isinstance(secondary, list):
+                names = [
+                    str(item.get("locationName") or "").strip()
+                    for item in secondary
+                    if isinstance(item, dict)
+                ]
+                names = [name for name in names if name]
+                if names:
+                    location_raw = ", ".join(names)
+
+        workplace = str(raw.get("workplaceType") or "").strip().lower()
+        remote_type = "remote" if workplace == "remote" else None
+
+        description_html = str(raw.get("descriptionHtml") or raw.get("description") or "")
+        description_text = html_to_text(description_html)
+        if not description_text:
+            # Board payloads often omit full description; keep a compact fallback corpus.
+            fallback_parts = [
+                title,
+                str(raw.get("departmentName") or "").strip(),
+                str(raw.get("teamName") or "").strip(),
+                location_raw,
+                workplace,
+            ]
+            description_text = " ".join(part for part in fallback_parts if part)
+
+        employment_type = str(raw.get("employmentType") or "").strip() or None
+        posted_at = str(raw.get("publishedDate") or raw.get("updatedAt") or "") or None
+
+        out.append(
+            JobRecord(
+                source=f"ashby:{slug}",
+                company=slug,
+                title=title,
+                url=canonical_url,
+                location_raw=location_raw or None,
+                remote_type=remote_type,
+                description_html=description_html or None,
+                description_text=description_text,
+                employment_type=employment_type,
+                posted_at=posted_at,
+                job_hash=compute_job_hash(
+                    company=slug,
+                    title=title,
+                    location_raw=location_raw,
+                    url=canonical_url,
+                ),
+            )
+        )
 
     return out
 
@@ -106,8 +224,7 @@ def collect_from_jsonld_pages(
                 continue
 
             jsonld_jobs = _read_jsonld_scripts(response.text)
-            if not jsonld_jobs:
-                continue
+            ashby_jobs = _extract_ashby_postings(seed_url=seed_url, html=response.text)
 
             source_host = urlparse(seed_url).netloc or "jsonld"
             for obj in jsonld_jobs:
@@ -164,5 +281,7 @@ def collect_from_jsonld_pages(
                         ),
                     )
                 )
+
+            jobs.extend(ashby_jobs)
 
     return jobs
