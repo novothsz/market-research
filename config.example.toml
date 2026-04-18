@@ -1,0 +1,18 @@
+database_path = "data/jobs.sqlite3"
+request_timeout_seconds = 20.0
+user_agent = "job-finder/0.1"
+tls_verify = true
+# tls_ca_bundle = "/path/to/corporate-ca.pem"
+
+[collectors]
+greenhouse_boards = [
+  "anthropic",
+  "deepmind",
+  "waymo",
+]
+seed_urls = [
+  "https://boards.greenhouse.io/anthropic",
+  "https://boards.greenhouse.io/deepmind",
+  "https://boards.greenhouse.io/waymo",
+]
+html_fallback_urls = []
