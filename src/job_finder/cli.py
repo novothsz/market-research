@@ -188,12 +188,17 @@ def _classify_jobs(
     return updated, llm_used
 
 
-def _resolve_output_path(fmt: str, output: Path | None) -> Path:
+def _resolve_output_path(fmt: str, output: Path | None, base_dir: Path = Path("data")) -> Path:
     if output is not None:
         return output
+    
     if fmt == "csv":
-        return Path("data/shortlist.csv")
-    return Path("data/shortlist.md")
+        base_dir.mkdir(parents=True, exist_ok=True)
+        return base_dir / "shortlist.csv"
+    
+    markdown_dir = base_dir / "markdown"
+    markdown_dir.mkdir(parents=True, exist_ok=True)
+    return markdown_dir / "shortlist.md"
 
 
 def _export_ranked_jobs(
@@ -203,6 +208,7 @@ def _export_ranked_jobs(
     limit: int,
     relevant_only: bool,
     prompt_text: str,
+    base_dir: Path = Path("data"),
 ) -> tuple[Path, int]:
     conn = connect_db(cfg.database_path)
     try:
@@ -211,7 +217,7 @@ def _export_ranked_jobs(
     finally:
         conn.close()
 
-    out = _resolve_output_path(fmt, output)
+    out = _resolve_output_path(fmt, output, base_dir)
     if fmt == "csv":
         count = export_jobs_to_csv(out, jobs)
     else:

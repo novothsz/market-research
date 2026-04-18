@@ -37,6 +37,7 @@ def export_jobs_by_location(
 ) -> dict[str, int]:
     """Export jobs into separate files by location."""
     
+    output_dir = Path(output_dir) / "markdown"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Group jobs by location

@@ -124,12 +124,18 @@ def export_markdown_to_pdf(md_file: Path, pdf_file: Path) -> None:
 
 def export_shortlists_to_pdf(data_dir: Path) -> dict[str, Path]:
     """Convert all markdown shortlists in a directory to PDF."""
-    data_dir = Path(data_dir)
+    markdown_dir = Path(data_dir) / "markdown"
+    pdf_dir = Path(data_dir) / "pdf"
+    
+    if not markdown_dir.exists():
+        return {}
+    
+    pdf_dir.mkdir(parents=True, exist_ok=True)
     pdf_files = {}
     
     # Find all shortlist markdown files
-    for md_file in sorted(data_dir.glob('shortlist_*.md')):
-        pdf_file = md_file.with_suffix('.pdf')
+    for md_file in sorted(markdown_dir.glob('shortlist_*.md')):
+        pdf_file = pdf_dir / md_file.with_suffix('.pdf').name
         try:
             export_markdown_to_pdf(md_file, pdf_file)
             pdf_files[md_file.stem] = pdf_file
@@ -137,9 +143,9 @@ def export_shortlists_to_pdf(data_dir: Path) -> dict[str, Path]:
             print(f"Error converting {md_file} to PDF: {e}")
     
     # Also convert main shortlist.md if it exists
-    main_shortlist = data_dir / 'shortlist.md'
+    main_shortlist = markdown_dir / 'shortlist.md'
     if main_shortlist.exists():
-        pdf_file = main_shortlist.with_suffix('.pdf')
+        pdf_file = pdf_dir / 'shortlist.pdf'
         try:
             export_markdown_to_pdf(main_shortlist, pdf_file)
             pdf_files['shortlist'] = pdf_file
