@@ -11,9 +11,10 @@ from job_finder.collectors import (
 )
 from job_finder.config import AppConfig, load_config, render_default_config
 from job_finder.export import export_jobs_to_csv, export_jobs_to_markdown
+from job_finder.export.by_location import export_jobs_by_location
 from job_finder.models import ClassificationResult, JobRecord
 from job_finder.profile_ingest import load_profile
-from job_finder.ranking import classify_job_with_ollama, classify_job_with_rules
+from job_finder.ranking import classify_job_with_ollama, classify_job_with_rules, apply_llm_final_gate
 from job_finder.storage import (
     connect_db,
     count_jobs,
@@ -145,8 +146,22 @@ def _classify_jobs(
             llm_reason = ""
             rule_reason = rule_result.why_relevant or rule_result.why_not_relevant
 
-            # Use LLM only for uncertain rule-based decisions.
-            if use_llm and 35.0 <= rule_result.score <= 75.0:
+            # Always use LLM for final filtering if enabled
+            if use_llm and rule_result.is_relevant:
+                llm_result = apply_llm_final_gate(
+                    job,
+                    profile_text=profile_text,
+                    prompt_text=prompt_text,
+                    rule_result=rule_result,
+                    model=llm_model,
+                    timeout_seconds=max(cfg.request_timeout_seconds, 45.0),
+                )
+                if llm_result is not None:
+                    final_result = llm_result
+                    llm_reason = llm_result.why_relevant or llm_result.why_not_relevant
+                    llm_used += 1
+            elif use_llm and 35.0 <= rule_result.score <= 75.0:
+                # Fallback: use LLM for uncertain rule-based decisions
                 llm_result = classify_job_with_ollama(
                     job,
                     prompt_text=prompt_text,
@@ -237,7 +252,7 @@ def classify(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
     prompt: str | None = typer.Option(None, "--prompt", help="Search goal prompt text."),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", help="Path to prompt text file."),
-    profile_file: Path | None = typer.Option(None, "--profile-file", help="Path to user profile text."),
+    profile_file: Path | None = typer.Option(None, "--profile-file", help="Path to user profile (text or PDF file)."),
     profile_text: str | None = typer.Option(None, "--profile-text", help="Inline profile text."),
     only_unclassified: bool = typer.Option(True, "--only-unclassified/--all"),
     use_llm: bool = typer.Option(False, "--use-llm/--no-llm"),
@@ -372,6 +387,39 @@ def run(
         prompt_text=prompt_text,
     )
     typer.echo(f"Export phase complete: exported={count}, output={out}")
+
+
+@app.command()
+def export_by_location(
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    prompt: str | None = typer.Option(None, "--prompt"),
+    prompt_file: Path | None = typer.Option(None, "--prompt-file"),
+    output_dir: Path = typer.Option(Path("data"), "--output-dir", "-o", help="Output directory for location-based splits."),
+    limit: int = typer.Option(100, "--limit", min=1, help="Max jobs per location."),
+    relevant_only: bool = typer.Option(True, "--relevant-only/--all"),
+) -> None:
+    """Export jobs into separate files by location (Budapest, Vienna, Zurich, Graz, Remote)."""
+    cfg = load_config(config)
+    prompt_text = ""
+    if prompt or prompt_file:
+        prompt_text = _load_prompt(prompt, prompt_file)
+
+    conn = connect_db(cfg.database_path)
+    try:
+        init_db(conn)
+        jobs = fetch_ranked_jobs(conn, limit=limit, relevant_only=relevant_only)
+    finally:
+        conn.close()
+
+    if not jobs:
+        typer.echo("No jobs found.")
+        return
+
+    counts = export_jobs_by_location(jobs, output_dir, prompt_text)
+    typer.echo(f"Exported jobs by location to {output_dir}:")
+    for location, count in sorted(counts.items()):
+        if count > 0:
+            typer.echo(f"  {location}: {count} jobs -> shortlist_{location}.md")
 
 
 def main() -> None:

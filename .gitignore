@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+*.pdf
 data/
 *.sqlite3
 config.toml

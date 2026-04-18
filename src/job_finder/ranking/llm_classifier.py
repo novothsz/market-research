@@ -25,6 +25,72 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     return payload
 
 
+def apply_llm_final_gate(
+    job: JobRecord,
+    profile_text: str,
+    prompt_text: str,
+    rule_result: ClassificationResult,
+    model: str = "gemma3:4b",
+    host: str = "http://127.0.0.1:11434",
+    timeout_seconds: float = 45.0,
+) -> ClassificationResult:
+    """Use LLM to make final go/no-go decision on including job in shortlist."""
+    if not rule_result.is_relevant:
+        return rule_result
+
+    instruction = (
+        "You are a job relevance classifier. Decide if this job should be in a candidate's shortlist. "
+        "Return JSON only.\n"
+        f"Candidate profile:\n{profile_text[:2000]}\n\n"
+        f"Search goal:\n{prompt_text}\n\n"
+        f"Job title: {job.title}\n"
+        f"Company: {job.company or 'unknown'}\n"
+        f"Location: {job.location_raw or 'unknown'}\n"
+        f"Description:\n{job.description_text[:4000]}\n\n"
+        "Questions to answer:\n"
+        "1. Is this job a strong match for the candidate's skills and experience?\n"
+        "2. Does the location work (priority: Budapest, Vienna, Graz, Zurich, or remote-friendly)?\n"
+        "3. Is this aligned with the candidate's search goals?\n"
+        "Return: {\"should_include\": true/false, \"confidence\": 0.0-1.0, \"reason\": \"brief justification\"}"
+    )
+
+    payload = {
+        "model": model,
+        "prompt": instruction,
+        "stream": False,
+    }
+
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            response = client.post(f"{host}/api/generate", json=payload)
+            response.raise_for_status()
+            response_json = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError, Exception):
+        return rule_result
+
+    raw_text = str(response_json.get("response") or "")
+    parsed = _extract_json_object(raw_text)
+    if not parsed:
+        return rule_result
+
+    should_include = bool(parsed.get("should_include", rule_result.is_relevant))
+    confidence = float(parsed.get("confidence", rule_result.confidence))
+    confidence = max(0.0, min(confidence, 1.0))
+    reason = str(parsed.get("reason", ""))
+
+    # Update relevance based on LLM decision
+    return ClassificationResult(
+        is_relevant=should_include,
+        category=rule_result.category,
+        confidence=confidence,
+        score=rule_result.score if should_include else 0.0,
+        why_relevant=reason if should_include else "",
+        why_not_relevant=reason if not should_include else rule_result.why_not_relevant,
+        matched_signals=rule_result.matched_signals if should_include else [],
+        red_flags=rule_result.red_flags + (["llm_rejected"] if not should_include else []),
+    )
+
+
 def classify_job_with_ollama(
     job: JobRecord,
     prompt_text: str,

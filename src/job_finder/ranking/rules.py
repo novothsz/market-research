@@ -57,6 +57,28 @@ HUNGARY_TERMS = {
     "budapest",
 }
 
+PRIORITY_LOCATIONS = {
+    "budapest",
+    "vienna",
+    "graz",
+    "zurich",
+}
+
+EUROPE_CITIES = {
+    "london",
+    "berlin",
+    "paris",
+    "amsterdam",
+    "stockholm",
+    "oxford",
+    "zurich",
+    "vienna",
+    "budapest",
+    "graz",
+    "prague",
+    "warsaw",
+}
+
 
 def _count_present(text: str, terms: set[str]) -> list[str]:
     return [term for term in terms if term in text]
@@ -87,8 +109,44 @@ def _detect_category(text: str, direct_hits: list[str], adjacent_hits: list[str]
     return "not_relevant"
 
 
+def _check_location_match(job: JobRecord, intent: SearchIntent) -> bool:
+    """Hard location filter: only accept priority EU locations or fully remote (not US-based)."""
+    location_str = (job.location_raw or "").lower()
+    if not location_str:
+        return False
+
+    # Exclude US jobs explicitly
+    us_markers = {"usa", "united states", "california", "texas", "new york", "mountain view", "san francisco", "seattle", "boston", " us,", " usa", "ny,", "ca,", "tx,"}
+    if any(marker in location_str for marker in us_markers):
+        return False
+
+    # Priority 1: Budapest, Vienna, Graz, Zurich (user's stated preference)
+    for city in PRIORITY_LOCATIONS:
+        if city in location_str:
+            return True
+
+    # Priority 2: Remote only (explicitly marked, not "remote-friendly" with US offices)
+    if "remote" in location_str and not any(marker in location_str for marker in {"usa", "united states", "california", "texas", "new york", "mountain view", "san francisco"}):
+        return True
+
+    return False
+
+
 def classify_job_with_rules(job: JobRecord, profile_text: str, prompt_text: str) -> ClassificationResult:
     intent = parse_search_prompt(prompt_text)
+
+    # Hard location filter: reject jobs outside acceptable locations
+    if not _check_location_match(job, intent):
+        return ClassificationResult(
+            is_relevant=False,
+            category="not_relevant",
+            confidence=0.95,
+            score=0.0,
+            why_relevant="",
+            why_not_relevant="Location does not match priority criteria (Budapest, Vienna, Graz, Zurich, or remote).",
+            matched_signals=[],
+            red_flags=["location_mismatch"],
+        )
 
     job_corpus = " ".join(
         [
@@ -119,8 +177,11 @@ def classify_job_with_rules(job: JobRecord, profile_text: str, prompt_text: str)
     if intent.remote_requested:
         score += 8.0 if remote_hits else -6.0
 
-    if intent.location_terms:
-        score += 6.0 if hungary_hits else -2.0
+    # Location bonus for priority cities (location already filtered above)
+    if any(city in job_corpus for city in PRIORITY_LOCATIONS):
+        score += 12.0
+    elif remote_hits:
+        score += 8.0
 
     if negative_hits and not direct_hits:
         score -= min(24.0, len(negative_hits) * 8.0)
