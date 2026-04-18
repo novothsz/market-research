@@ -12,6 +12,7 @@ from job_finder.collectors import (
 from job_finder.config import AppConfig, load_config, render_default_config
 from job_finder.export import export_jobs_to_csv, export_jobs_to_markdown
 from job_finder.export.by_location import export_jobs_by_location
+from job_finder.export.pdf import export_shortlists_to_pdf
 from job_finder.models import ClassificationResult, JobRecord
 from job_finder.profile_ingest import load_profile
 from job_finder.ranking import classify_job_with_ollama, classify_job_with_rules, apply_llm_final_gate
@@ -420,6 +421,22 @@ def export_by_location(
     for location, count in sorted(counts.items()):
         if count > 0:
             typer.echo(f"  {location}: {count} jobs -> shortlist_{location}.md")
+
+
+@app.command()
+def export_pdf(
+    data_dir: Path = typer.Option(Path("data"), "--data-dir", "-d", help="Directory containing markdown shortlists."),
+) -> None:
+    """Convert markdown shortlists to PDF format."""
+    pdf_files = export_shortlists_to_pdf(data_dir)
+    
+    if not pdf_files:
+        typer.echo("No markdown shortlist files found.")
+        return
+    
+    typer.echo(f"Converted {len(pdf_files)} markdown files to PDF:")
+    for name, pdf_path in sorted(pdf_files.items()):
+        typer.echo(f"  {pdf_path}")
 
 
 def main() -> None:
